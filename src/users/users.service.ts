@@ -21,7 +21,6 @@ export class UsersService {
   }
 
   public async getManyUsers(params?: any) {
-    console.log(await this.mongoManager.collectionIndexes(User));
     return this.mongoManager.find(User, params ? params : {});
   }
 

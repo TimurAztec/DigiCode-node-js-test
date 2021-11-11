@@ -12,10 +12,58 @@ export class FilesService {
   protected scanner: ChildProcessWithoutNullStreams;
   protected mongoManager: MongoEntityManager = getMongoManager();
 
+  public async getFiles(params?: any) {
+    let searchParams = {};
+    if (params.path) {
+      const searchPath = path.join(process.env.WORKING_DIRECTORY, params.path);
+      await this.mongoManager.dropCollectionIndexes(FileEntity);
+      await this.mongoManager.createCollectionIndex(FileEntity, {path: "text"});
+      searchParams = {
+        ...searchParams,
+        $text: { $search: ("\"" + searchPath + "\"") }
+      }
+    }
+    if (params.name) {
+      await this.mongoManager.dropCollectionIndexes(FileEntity);
+      await this.mongoManager.createCollectionIndex(FileEntity, {name: "text"});
+      searchParams = {
+        ...searchParams,
+        $text: { $search: ("\"" + params.name + "\"") }
+      }
+    }
+    if (params.text) {
+      await this.mongoManager.dropCollectionIndexes(FileEntity);
+      await this.mongoManager.createCollectionIndex(FileEntity, {text: "text"});
+      searchParams = {
+        ...searchParams,
+        $text: { $search: ("\"" + params.text + "\"") }
+      }
+    }
+    if (params.created_at) {
+      let startDate = new Date(params.created_at);
+      let endDate = new Date(params.created_at);
+      endDate.setDate(endDate.getDate() + 1);
+      searchParams = {
+        ...searchParams,
+        created_at: { $gte: startDate.toISOString(), $lte: endDate.toISOString() }
+      }
+    }
+    if (params.updated_at) {
+      let startDate = new Date(params.updated_at);
+      let endDate = new Date(params.updated_at);
+      endDate.setDate(endDate.getDate() + 1);
+      searchParams = {
+        ...searchParams,
+        updated_at: { $gte: startDate.toISOString(), $lte: endDate.toISOString() }
+      }
+    }
+    console.log(searchParams);
+    return await this.mongoManager.find(FileEntity, searchParams);
+  }
+
   public async enableScanner(): Promise<void> {
-    await this.mongoManager.deleteMany(FileEntity, {})
-    // console.log(this.mongoManager.remove(FileEntity));
-    this.scanner = ChildProcess.spawn("node", ["./directory-scanner-script/main.js", path.join(process.env.WORKING_DIRECTORY, 'static')]);
+    await this.mongoManager.deleteMany(FileEntity, {});
+    this.scanner = ChildProcess.spawn("node", ["./directory-scanner-script/main.js", process.env.WORKING_DIRECTORY]);
     this.scanner.stdout.on('data', (data) => {
       try {
         const scanEvent = JSON.parse(data.toString());
@@ -48,7 +96,11 @@ export class FilesService {
     file.size = fileData.size;
     file.created_at = fileData.created_at;
     file.updated_at = fileData.updated_at;
-    return await this.mongoManager.findOneAndReplace(FileEntity, {path: fileData.path} ,file);
+    const replacedFile = await this.mongoManager.findOneAndReplace(FileEntity, {path: fileData.path} ,file);
+    if (!replacedFile.value) {
+      return await this.mongoManager.save(file);
+    }
+    return replacedFile;
   }
 
   protected async removeFile(path: string): Promise<any> {
