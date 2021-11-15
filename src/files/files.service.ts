@@ -7,6 +7,8 @@ import { MongoEntityManager } from "typeorm/entity-manager/MongoEntityManager";
 import { File as FileEntity } from "./file.entity";
 import * as chokidar from "chokidar";
 import * as os from "os";
+import { Task } from "./task.entity";
+import { FilesModuleNames } from "./misc/files-module-names";
 
 @Injectable()
 export class FilesService {
@@ -14,7 +16,6 @@ export class FilesService {
   protected workers: ChildProcessWithoutNullStreams[] = [];
   protected mongoManager: MongoEntityManager = getMongoManager();
   protected FSWatcher: chokidar.FSWatcher;
-  protected taskQuery: any[] = [];
 
   public async getFiles(params?: any) {
     let searchParams = {};
@@ -61,59 +62,51 @@ export class FilesService {
         updated_at: { $gte: startDate.toISOString(), $lte: endDate.toISOString() }
       }
     }
-    console.log(searchParams);
     return await this.mongoManager.find(FileEntity, searchParams);
   }
 
   public async enableScanner(): Promise<void> {
     await this.mongoManager.deleteMany(FileEntity, {});
     this.FSWatcher = chokidar.watch(process.env.WORKING_DIRECTORY, {
+      ignored: process.env.EXCLUDED_DIRECTORIES,
       persistent: true,
       ignoreInitial: false
     });
 
     this.FSWatcher
-      .on("add", (path, stats) => {
-        const task: any = {
-          eventType: "add",
-          path: path,
-          name: NodePath.basename(path),
-          size: stats.size,
-          created_at: stats.birthtime,
-          updated_at: stats.mtime,
-        }
-        this.taskQuery.push(task);
+      .on(FilesModuleNames.ScanEvents.Create, (path, stats) => {
+        const task: any = new Task();
+          task.eventType = FilesModuleNames.ScanEvents.Create;
+          task.path = path;
+          task.name = NodePath.basename(path);
+          task.size = stats.size;
+          task.created_at = stats.birthtime;
+          task.updated_at = stats.mtime;
+        this.mongoManager.save(task);
       })
-      .on("change", (path, stats) => {
-        const task: any = {
-          eventType: "change",
-          path: path,
-          name: NodePath.basename(path),
-          size: stats.size,
-          created_at: stats.birthtime,
-          updated_at: stats.mtime,
-        }
-        this.taskQuery.push(task);
+      .on(FilesModuleNames.ScanEvents.Update, (path, stats) => {
+        const task: any = new Task();
+          task.eventType = FilesModuleNames.ScanEvents.Update;
+          task.path = path;
+          task.name = NodePath.basename(path);
+          task.size = stats.size;
+          task.created_at = stats.birthtime;
+          task.updated_at = stats.mtime;
+        this.mongoManager.save(task);
       })
-      .on("unlink", (path, stats) => {
-        const task: any = {
-          eventType: "unlink",
-          path: path
-        }
-        this.taskQuery.push(task);
+      .on(FilesModuleNames.ScanEvents.Delete, (path, stats) => {
+        const task: any = new Task();
+          task.eventType = FilesModuleNames.ScanEvents.Delete;
+          task.path = path;
+        this.mongoManager.save(task);
       });
 
     for (let i = 1; i <= os.cpus().length; i++) {
       let worker = ChildProcess.fork("./worker-script/main.js", [process.env.WORKING_DIRECTORY]);
       this.workers.push(worker);
       worker.on("message", (data: any) => {
-        if (data.state && data.state == "waiting") {
-          if (this.taskQuery.length) {
-            worker.send(this.taskQuery.shift());
-          }
-        } else {
-          console.log(`Worker(${i})`, data);
-        }
+        console.log('\x1b[36m%s\x1b[0m', `Worker(#${i}) report: `);
+        console.log(data);
       });
     }
   }

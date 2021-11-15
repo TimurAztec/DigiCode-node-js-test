@@ -1,9 +1,11 @@
 import { Column, Entity, ObjectID, ObjectIdColumn } from "typeorm";
 
 @Entity()
-export class File {
+export class Task {
   @ObjectIdColumn()
   id: ObjectID;
+  @Column({type: 'text'})
+  eventType: string;
   @Column({type: 'text'})
   path: string;
   @Column({type: 'text'})

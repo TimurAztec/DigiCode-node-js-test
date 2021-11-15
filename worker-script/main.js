@@ -32,48 +32,52 @@ const mongodb_1 = require("mongodb");
 const fs = __importStar(require("fs"));
 let mongoClient;
 let filesCollection;
+let tasksCollection;
 let TaskWaiter;
 function main() {
     return __awaiter(this, void 0, void 0, function* () {
         // @ts-ignore
         mongoClient = yield mongodb_1.MongoClient.connect('mongodb://localhost:27017', { useUnifiedTopology: true });
         filesCollection = yield mongoClient.db("directory-scanner").collection("file");
+        tasksCollection = yield mongoClient.db("directory-scanner").collection("task");
         waitForTasks();
     });
 }
 function waitForTasks() {
     TaskWaiter = setInterval(() => {
-        process.send({ state: "waiting" });
-    }, 0.1);
+        tasksCollection.findOneAndDelete({}).then((modifyResult) => {
+            if (modifyResult.ok && modifyResult.value) {
+                const taskData = modifyResult.value;
+                if (taskData && taskData.eventType) {
+                    killTaskWaiter();
+                    if (taskData.eventType == "add") {
+                        const text = fs.readFileSync(taskData.path).toString();
+                        createFile(Object.assign(Object.assign({}, taskData), { text })).then((newFile) => {
+                            process.send({ task: taskData.eventType, result: newFile });
+                            waitForTasks();
+                        });
+                    }
+                    if (taskData.eventType == "change") {
+                        const text = fs.readFileSync(taskData.path).toString();
+                        updateFile(Object.assign(Object.assign({}, taskData), { text })).then((updatedFile) => {
+                            process.send({ task: taskData.eventType, result: updatedFile });
+                            waitForTasks();
+                        });
+                    }
+                    if (taskData.eventType == "unlink") {
+                        removeFile(taskData.path).then((removedFile) => {
+                            process.send({ task: taskData.eventType, result: removedFile });
+                            waitForTasks();
+                        });
+                    }
+                }
+            }
+        });
+    }, 1);
 }
 function killTaskWaiter() {
     clearInterval(TaskWaiter);
 }
-process.on("message", (taskData) => {
-    if (taskData.eventType) {
-        killTaskWaiter();
-        if (taskData.eventType == "add") {
-            const text = fs.readFileSync(taskData.path).toString();
-            createFile(Object.assign(Object.assign({}, taskData), { text })).then((newFile) => {
-                process.send({ task: taskData, result: newFile.result });
-                waitForTasks();
-            });
-        }
-        if (taskData.eventType == "change") {
-            const text = fs.readFileSync(taskData.path).toString();
-            updateFile(Object.assign(Object.assign({}, taskData), { text })).then((updatedFile) => {
-                process.send({ task: taskData, result: updatedFile.result });
-                waitForTasks();
-            });
-        }
-        if (taskData.eventType == "unlink") {
-            removeFile(taskData.path).then((removedFile) => {
-                process.send({ task: taskData, result: removedFile.result });
-                waitForTasks();
-            });
-        }
-    }
-});
 function createFile(fileData) {
     return __awaiter(this, void 0, void 0, function* () {
         const file = new Object();
