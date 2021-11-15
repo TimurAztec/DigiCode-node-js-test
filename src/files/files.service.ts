@@ -1,21 +1,25 @@
 import { Injectable } from '@nestjs/common';
 import * as ChildProcess from "child_process";
-import * as path from "path";
+import * as NodePath from "path";
 import { ChildProcessWithoutNullStreams } from "child_process";
 import { getMongoManager } from "typeorm";
 import { MongoEntityManager } from "typeorm/entity-manager/MongoEntityManager";
 import { File as FileEntity } from "./file.entity";
+import * as chokidar from "chokidar";
+import * as os from "os";
 
 @Injectable()
 export class FilesService {
 
-  protected scanner: ChildProcessWithoutNullStreams;
+  protected workers: ChildProcessWithoutNullStreams[] = [];
   protected mongoManager: MongoEntityManager = getMongoManager();
+  protected FSWatcher: chokidar.FSWatcher;
+  protected taskQuery: any[] = [];
 
   public async getFiles(params?: any) {
     let searchParams = {};
     if (params.path) {
-      const searchPath = path.join(process.env.WORKING_DIRECTORY, params.path);
+      const searchPath = NodePath.join(process.env.WORKING_DIRECTORY, params.path);
       await this.mongoManager.dropCollectionIndexes(FileEntity);
       await this.mongoManager.createCollectionIndex(FileEntity, {path: "text"});
       searchParams = {
@@ -63,48 +67,55 @@ export class FilesService {
 
   public async enableScanner(): Promise<void> {
     await this.mongoManager.deleteMany(FileEntity, {});
-    this.scanner = ChildProcess.spawn("node", ["./directory-scanner-script/main.js", process.env.WORKING_DIRECTORY]);
-    this.scanner.stdout.on('data', (data) => {
-      try {
-        const scanEvent = JSON.parse(data.toString());
-        console.log('Incoming scan event: ', scanEvent);
-        if (scanEvent.eventType == "add") this.createFile(scanEvent);
-        if (scanEvent.eventType == "change") this.updateFile(scanEvent);
-        if (scanEvent.eventType == "unlink") this.removeFile(scanEvent.path);
-      } catch (e) {
-        console.error('\x1b[31m', data.toString(), e);
-      }
+    this.FSWatcher = chokidar.watch(process.env.WORKING_DIRECTORY, {
+      persistent: true,
+      ignoreInitial: false
     });
-  }
 
-  protected async createFile(fileData): Promise<any> {
-    const file = new FileEntity();
-    file.path = fileData.path;
-    file.name = fileData.name;
-    file.text = fileData.text;
-    file.size = fileData.size;
-    file.created_at = fileData.created_at;
-    file.updated_at = fileData.updated_at;
-    return await this.mongoManager.save(file);
-  }
+    this.FSWatcher
+      .on("add", (path, stats) => {
+        const task: any = {
+          eventType: "add",
+          path: path,
+          name: NodePath.basename(path),
+          size: stats.size,
+          created_at: stats.birthtime,
+          updated_at: stats.mtime,
+        }
+        this.taskQuery.push(task);
+      })
+      .on("change", (path, stats) => {
+        const task: any = {
+          eventType: "change",
+          path: path,
+          name: NodePath.basename(path),
+          size: stats.size,
+          created_at: stats.birthtime,
+          updated_at: stats.mtime,
+        }
+        this.taskQuery.push(task);
+      })
+      .on("unlink", (path, stats) => {
+        const task: any = {
+          eventType: "unlink",
+          path: path
+        }
+        this.taskQuery.push(task);
+      });
 
-  protected async updateFile(fileData): Promise<any> {
-    const file = new FileEntity();
-    file.path = fileData.path;
-    file.name = fileData.name;
-    file.text = fileData.text;
-    file.size = fileData.size;
-    file.created_at = fileData.created_at;
-    file.updated_at = fileData.updated_at;
-    const replacedFile = await this.mongoManager.findOneAndReplace(FileEntity, {path: fileData.path} ,file);
-    if (!replacedFile.value) {
-      return await this.mongoManager.save(file);
+    for (let i = 1; i <= os.cpus().length; i++) {
+      let worker = ChildProcess.fork("./worker-script/main.js", [process.env.WORKING_DIRECTORY]);
+      this.workers.push(worker);
+      worker.on("message", (data: any) => {
+        if (data.state && data.state == "waiting") {
+          if (this.taskQuery.length) {
+            worker.send(this.taskQuery.shift());
+          }
+        } else {
+          console.log(`Worker(${i})`, data);
+        }
+      });
     }
-    return replacedFile;
-  }
-
-  protected async removeFile(path: string): Promise<any> {
-    return await this.mongoManager.findOneAndDelete(FileEntity, { path });
   }
 
 }

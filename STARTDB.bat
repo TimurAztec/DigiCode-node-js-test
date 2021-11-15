@@ -1,0 +1,1 @@
+mongod --dbpath C:\Projects\Programming\DigiCode\nest-mongo-directory-scanner\db
