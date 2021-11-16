@@ -37,7 +37,7 @@ let TaskWaiter;
 function main() {
     return __awaiter(this, void 0, void 0, function* () {
         // @ts-ignore
-        mongoClient = yield mongodb_1.MongoClient.connect('mongodb://localhost:27017', { useUnifiedTopology: true });
+        mongoClient = yield mongodb_1.MongoClient.connect('mongodb://mongo:27017', { useUnifiedTopology: true });
         filesCollection = yield mongoClient.db("directory-scanner").collection("file");
         tasksCollection = yield mongoClient.db("directory-scanner").collection("task");
         waitForTasks();

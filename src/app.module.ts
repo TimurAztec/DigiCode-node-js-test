@@ -18,7 +18,7 @@ import { Connection, getConnectionManager } from "typeorm";
     }),
     TypeOrmModule.forRoot({
       type: 'mongodb',
-      host: 'localhost',
+      host: 'mongo',
       port: 27017,
       database: 'directory-scanner',
       useUnifiedTopology: true,

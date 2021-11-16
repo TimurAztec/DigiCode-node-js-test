@@ -1,0 +1,18 @@
+version: "3"
+services:
+    nest-mongo-directory-scanner:
+        container_name: nest-mongo-directory-scanner
+        image: nest-mongo-directory-scanner
+        restart: always
+        build: .
+        ports:
+            - "3488:3488"
+        links:
+            - mongo
+    mongo:
+        container_name: mongo
+        image: mongo
+        volumes:
+            - ./db
+        ports:
+            - '27017:27017'

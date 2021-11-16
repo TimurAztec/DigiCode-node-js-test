@@ -102,7 +102,7 @@ export class FilesService {
       });
 
     for (let i = 1; i <= os.cpus().length; i++) {
-      let worker = ChildProcess.fork("./worker-script/main.js", [process.env.WORKING_DIRECTORY]);
+      let worker = ChildProcess.fork("./worker-script/main.js");
       this.workers.push(worker);
       worker.on("message", (data: any) => {
         console.log('\x1b[36m%s\x1b[0m', `Worker(#${i}) report: `);
